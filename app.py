@@ -33,8 +33,8 @@ def ieladet_katalogu():
 if check_password():
     # --- PIEVIENO ATTĒLU / LOGO ---
     # Ja tev GitHub ir fails 'logo.png', tas parādīsies šeit
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=200)
+    if os.path.exists("logo.png.png"):
+        st.image("logo.png.png", width=200)
     
     st.title("🏠 Dinamiskā Tāmēšanas Sistēma")
     
