@@ -382,14 +382,18 @@ with st.expander("Pievienot materiālu", expanded=True):
 
     # UI: bilde + apraksts blakus
     if img or desc or auto_desc:
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if img and is_direct_image_url(img):
-                show_material_image(img, width=520)
-            elif img and img.startswith("http"):
-                st.info("Šeit 'Image' ir lapa, nevis bilde. Ieliec tiešo .jpg/.png vai ieliec URL kolonnā.")
+
+    c1, c2 = st.columns([1,2])
+
+    with c1:
+        if img and is_direct_image_url(img):
+            show_material_image(img, width=420)
+
     with c2:
-            st.markdown("### Apraksts")
+        st.markdown(f"## {izvele}")
+        st.markdown(f"**Cena:** {cena:.2f} EUR")
+
+        st.markdown("### Apraksts")
 
         if desc:
             st.write(desc)
