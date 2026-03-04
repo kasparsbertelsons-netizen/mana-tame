@@ -1,5 +1,4 @@
 import os
-import json
 import re
 from datetime import date
 from urllib.parse import quote
@@ -59,12 +58,12 @@ def show_logo():
 
 
 # -------------------------
-# 3) KATALOGS: Materials / Price / Image / Description / URL
+# 3) KATALOGS: Materials / Price / Unit / Image / Description / URL
 # -------------------------
 @st.cache_data(show_spinner=False)
 def load_catalog(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
-        return pd.DataFrame(columns=["Materials", "Price", "Image", "Description", "URL"])
+        return pd.DataFrame(columns=["Materials", "Price", "Unit", "Image", "Description", "URL"])
 
     df = pd.read_excel(path)
 
@@ -73,6 +72,8 @@ def load_catalog(path: str) -> pd.DataFrame:
             raise ValueError(f"Excel failā trūkst kolonna: {col}")
 
     # optional kolonnas
+    if "Unit" not in df.columns:
+        df["Unit"] = ""
     if "Image" not in df.columns:
         df["Image"] = ""
     if "Description" not in df.columns:
@@ -80,12 +81,12 @@ def load_catalog(path: str) -> pd.DataFrame:
     if "URL" not in df.columns:
         df["URL"] = ""
 
-    df = df[["Materials", "Price", "Image", "Description", "URL"]].copy()
+    df = df[["Materials", "Price", "Unit", "Image", "Description", "URL"]].copy()
 
     df["Materials"] = df["Materials"].astype(str).str.strip()
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0.0)
 
-    for c in ["Image", "Description", "URL"]:
+    for c in ["Unit", "Image", "Description", "URL"]:
         df[c] = df[c].astype(str).fillna("").str.strip()
         df.loc[df[c].str.lower() == "nan", c] = ""
 
@@ -124,7 +125,7 @@ def fetch_image_bytes(url: str) -> tuple[bytes | None, str]:
         return None, f"ERROR: {e}"
 
 
-def show_material_image(path_or_url: str, width: int = 420):
+def show_material_image(path_or_url: str, width: int = 350):
     if not path_or_url:
         return
 
@@ -143,7 +144,7 @@ def show_material_image(path_or_url: str, width: int = 420):
 
 
 # -------------------------
-# 5) AUTO APRAKSTS NO URL (bez debug teksta UI)
+# 5) AUTO APRAKSTS NO URL
 # -------------------------
 def _clean_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
@@ -232,29 +233,33 @@ def create_pdf(df: pd.DataFrame, pamatsumma: float, uzcenojums_pct: float, pvn_p
 
     if use_unicode:
         pdf.set_font("DejaVu", "B", 11)
-        h = ["Materials", "Daudz.", "Cena", "Summa"]
+        h = ["Materials", "Mērv.", "Daudz.", "Cena", "Summa"]
     else:
         pdf.set_font("Arial", "B", 11)
-        h = list(map(safe_text_latin1, ["Materials", "Daudz.", "Cena", "Summa"]))
+        h = list(map(safe_text_latin1, ["Materials", "Mērv.", "Daudz.", "Cena", "Summa"]))
 
-    pdf.cell(90, 8, h[0], 1)
-    pdf.cell(25, 8, h[1], 1, align="R")
-    pdf.cell(35, 8, h[2], 1, align="R")
-    pdf.cell(40, 8, h[3], 1, align="R")
+    pdf.cell(70, 8, h[0], 1)
+    pdf.cell(20, 8, h[1], 1)
+    pdf.cell(25, 8, h[2], 1, align="R")
+    pdf.cell(35, 8, h[3], 1, align="R")
+    pdf.cell(40, 8, h[4], 1, align="R")
     pdf.ln()
 
     pdf.set_font("DejaVu" if use_unicode else "Arial", "", 11)
 
     for _, row in df.iterrows():
         mat = str(row["Materials"])
+        unit = str(row.get("Unit", ""))
         if not use_unicode:
             mat = safe_text_latin1(mat)
+            unit = safe_text_latin1(unit)
 
         qty = float(row["Daudzums"])
         price = float(row["Cena"])
         s = qty * price
 
-        pdf.cell(90, 8, mat[:45], 1)
+        pdf.cell(70, 8, mat[:35], 1)
+        pdf.cell(20, 8, unit[:8], 1)
         pdf.cell(25, 8, f"{qty:.2f}", 1, align="R")
         pdf.cell(35, 8, f"{price:.2f}", 1, align="R")
         pdf.cell(40, 8, f"{s:.2f}", 1, align="R")
@@ -265,22 +270,16 @@ def create_pdf(df: pd.DataFrame, pamatsumma: float, uzcenojums_pct: float, pvn_p
     ar_uzcen = pamatsumma * (1 + uzcenojums_pct / 100)
     pvn_sum = ar_uzcen * (pvn_pct / 100)
 
-    if use_unicode:
-        pdf.set_font("DejaVu", "B", 12)
-        labels = [
-            ("Pamatsumma:", pamatsumma),
-            (f"Uzcenojums ({uzcenojums_pct:.2f}%):", ar_uzcen - pamatsumma),
-            (f"PVN ({pvn_pct:.2f}%):", pvn_sum),
-            ("KOPĀ ar PVN:", kopa_ar_pvn),
-        ]
-    else:
-        pdf.set_font("Arial", "B", 12)
-        labels = [
-            (safe_text_latin1("Pamatsumma:"), pamatsumma),
-            (safe_text_latin1(f"Uzcenojums ({uzcenojums_pct:.2f}%):"), ar_uzcen - pamatsumma),
-            (safe_text_latin1(f"PVN ({pvn_pct:.2f}%):"), pvn_sum),
-            (safe_text_latin1("KOPĀ ar PVN:"), kopa_ar_pvn),
-        ]
+    pdf.set_font("DejaVu" if use_unicode else "Arial", "B", 12)
+
+    labels = [
+        ("Pamatsumma:", pamatsumma),
+        (f"Uzcenojums ({uzcenojums_pct:.2f}%):", ar_uzcen - pamatsumma),
+        (f"PVN ({pvn_pct:.2f}%):", pvn_sum),
+        ("KOPĀ ar PVN:", kopa_ar_pvn),
+    ]
+    if not use_unicode:
+        labels = [(safe_text_latin1(a), b) for a, b in labels]
 
     for i, (lab, val) in enumerate(labels):
         pdf.cell(150, 8 if i < 3 else 10, lab, 0, align="R")
@@ -304,9 +303,8 @@ uzcenojums_pct = st.sidebar.number_input("Uzcenojums %", 0.0, 200.0, 10.0, 1.0)
 pvn_pct = st.sidebar.number_input("PVN %", 0.0, 25.0, 21.0, 0.5)
 st.sidebar.divider()
 
-# Pogas sidebar (tikai nepieciešamais)
 if st.sidebar.button("🗑️ Notīrīt visu", use_container_width=True):
-    st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
+    st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena", "Unit"])
     st.rerun()
 
 catalog_path = "katalogs.xlsx"
@@ -319,15 +317,15 @@ if st.sidebar.button("🔄 Pārlasīt katalogu", use_container_width=True):
     st.rerun()
 
 CAT_PRICE = catalog_price_dict(df_kat)
+CAT_UNIT = dict(zip(df_kat["Materials"], df_kat["Unit"]))
 CAT_IMG = dict(zip(df_kat["Materials"], df_kat["Image"]))
 CAT_DESC = dict(zip(df_kat["Materials"], df_kat["Description"]))
 CAT_URL = dict(zip(df_kat["Materials"], df_kat["URL"]))
 
 if "tame" not in st.session_state:
-    st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
+    st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena", "Unit"])
 
 
-# Pievienot materiālu
 with st.expander("Pievienot materiālu", expanded=True):
     if len(CAT_PRICE) == 0:
         st.warning("Katalogs ir tukšs vai nav atrasts.")
@@ -343,38 +341,38 @@ with st.expander("Pievienot materiālu", expanded=True):
 
     izvele = st.selectbox("Izvēlies materiālu:", keys)
     cena = float(CAT_PRICE[izvele])
+    unit = str(CAT_UNIT.get(izvele, "")).strip()
 
     img = str(CAT_IMG.get(izvele, "")).strip()
     desc = str(CAT_DESC.get(izvele, "")).strip()
     url = str(CAT_URL.get(izvele, "")).strip()
 
-    # Ja apraksts tukšs un ir URL -> ģenerē
     auto_desc = ""
     if (not desc) and url:
         auto_desc = generate_description_from_url(url)
 
-    # Produkta kartīte: attēls + teksts blakus
+    # Produkta kartīte
     if img or desc or auto_desc:
-        c1, c2 = st.columns([1, 1])
-
+        c1, c2 = st.columns([1, 3])  # platāks tekstam
         with c1:
             if img and is_direct_image_url(img):
-                show_material_image(img, width=420)
+                show_material_image(img, width=350)
             elif img and img.startswith("http") and not is_direct_image_url(img):
                 st.info("Kolonnā 'Image' vajag tiešo .jpg/.png linku.")
-
         with c2:
             st.markdown(f"## {izvele}")
-            st.markdown(f"**Cena:** {cena:.2f} EUR")
+            if unit:
+                st.markdown(f"**Cena:** {cena:.2f} EUR / {unit}")
+            else:
+                st.markdown(f"**Cena:** {cena:.2f} EUR")
+            st.divider()
             st.markdown("### Apraksts")
-
             if desc:
                 st.write(desc)
             elif auto_desc:
                 st.write(auto_desc)
             else:
                 st.caption("Nav apraksta.")
-
             if url:
                 st.link_button("🔗 Atvērt produkta lapu", url)
 
@@ -395,13 +393,14 @@ with st.expander("Pievienot materiālu", expanded=True):
                 idx = df.index[df["Materials"] == izvele][0]
                 df.loc[idx, "Daudzums"] = float(df.loc[idx, "Daudzums"]) + float(daudz)
                 df.loc[idx, "Cena"] = cena
+                df.loc[idx, "Unit"] = unit
             else:
-                jauns = pd.DataFrame({"Materials": [izvele], "Daudzums": [daudz], "Cena": [cena]})
+                jauns = pd.DataFrame({"Materials": [izvele], "Daudzums": [daudz], "Cena": [cena], "Unit": [unit]})
                 df = pd.concat([df, jauns], ignore_index=True)
 
             df["Daudzums"] = pd.to_numeric(df["Daudzums"], errors="coerce").fillna(0.0)
             df["Cena"] = pd.to_numeric(df["Cena"], errors="coerce").fillna(0.0)
-            df = df.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last"})
+            df = df.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last", "Unit": "last"})
             st.session_state.tame = df
             st.rerun()
 
@@ -409,12 +408,11 @@ with st.expander("Pievienot materiālu", expanded=True):
         df = st.session_state.tame.copy()
         df["Daudzums"] = pd.to_numeric(df["Daudzums"], errors="coerce").fillna(0.0)
         df["Cena"] = pd.to_numeric(df["Cena"], errors="coerce").fillna(0.0)
-        df = df.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last"})
+        df = df.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last", "Unit": "last"})
         st.session_state.tame = df
         st.rerun()
 
 
-# Kopsavilkums
 df = st.session_state.tame.copy()
 if df.empty:
     st.info("Pievieno materiālus, lai izveidotu tāmi.")
@@ -431,6 +429,7 @@ edited = st.data_editor(
     num_rows="dynamic",
     column_config={
         "Materials": st.column_config.TextColumn("Materials"),
+        "Unit": st.column_config.TextColumn("Unit"),
         "Daudzums": st.column_config.NumberColumn("Daudzums", min_value=0.0, step=1.0),
         "Cena": st.column_config.NumberColumn("Cena", min_value=0.0, step=0.01, format="%.2f"),
         "Summa": st.column_config.NumberColumn("Summa", disabled=True, format="%.2f"),
@@ -442,8 +441,9 @@ edited = st.data_editor(
 save_back = edited.drop(columns=["Summa"], errors="ignore").copy()
 save_back["Daudzums"] = pd.to_numeric(save_back["Daudzums"], errors="coerce").fillna(0.0)
 save_back["Cena"] = pd.to_numeric(save_back["Cena"], errors="coerce").fillna(0.0)
+save_back["Unit"] = save_back.get("Unit", "").astype(str).fillna("").str.strip()
 save_back = save_back[save_back["Daudzums"] > 0].copy()
-save_back = save_back.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last"})
+save_back = save_back.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last", "Unit": "last"})
 st.session_state.tame = save_back
 
 df2 = save_back.copy()
