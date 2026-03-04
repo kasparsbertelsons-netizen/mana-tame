@@ -344,32 +344,9 @@ CAT_URL = dict(zip(df_kat["Materials"], df_kat["URL"]))
 if "tame" not in st.session_state:
     st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
 
-
-# Projekts: save/load
-st.sidebar.subheader("Projekts")
-up = st.sidebar.file_uploader("Ielādēt tāmi (JSON)", type=["json"])
-if up:
-    try:
-        records = json.loads(up.read().decode("utf-8"))
-        st.session_state.tame = pd.DataFrame(records)[["Materials", "Daudzums", "Cena"]]
-        st.rerun()
-    except Exception as e:
-        st.sidebar.error(f"Neizdevās ielādēt JSON: {e}")
-
-if not st.session_state.tame.empty:
-    data = st.session_state.tame.to_dict(orient="records")
-    st.sidebar.download_button(
-        "💾 Saglabāt tāmi (JSON)",
-        data=json.dumps(data, ensure_ascii=False).encode("utf-8"),
-        file_name=f"tame_{date.today().isoformat()}.json",
-        mime="application/json",
-        use_container_width=True,
-    )
-
 if st.sidebar.button("🗑️ Notīrīt visu", use_container_width=True):
     st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
     st.rerun()
-
 
 # Pievienot materiālu
 with st.expander("Pievienot materiālu", expanded=True):
