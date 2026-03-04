@@ -69,44 +69,29 @@ def show_logo():
 @st.cache_data(show_spinner=False)
 def load_catalog(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
-        return pd.DataFrame(columns=["Materials", "Cena", "Attels"])
+        return pd.DataFrame(columns=["Materials", "Price", "Image"])
 
     df = pd.read_excel(path)
 
-    cols = {c.strip(): c for c in df.columns}
-    if "Materials" not in cols or "Cena" not in cols:
-        raise ValueError("Excel failā jābūt kolonnām: 'Materials' un 'Cena'.")
+    # pārliecināmies ka kolonnas eksistē
+    required = ["Materials", "Price"]
+    for col in required:
+        if col not in df.columns:
+            raise ValueError(f"Excel failā trūkst kolonna: {col}")
 
-    # Attels ir optional
-    attels_col = cols.get("Attels")
+    # Image kolonna nav obligāta
+    if "Image" not in df.columns:
+        df["Image"] = ""
 
-    use_cols = [cols["Materials"], cols["Cena"]] + ([attels_col] if attels_col else [])
-    df = df[use_cols].copy()
-
-    # normalize
-    new_cols = ["Materials", "Cena"] + (["Attels"] if attels_col else [])
-    df.columns = new_cols
+    df = df[["Materials", "Price", "Image"]].copy()
 
     df["Materials"] = df["Materials"].astype(str).str.strip()
-    df["Cena"] = pd.to_numeric(df["Cena"], errors="coerce").fillna(0.0)
-
-    if "Attels" in df.columns:
-        df["Attels"] = df["Attels"].astype(str).fillna("").str.strip()
-        # Excel NaN parasti pārtop par "nan"
-        df.loc[df["Attels"].str.lower() == "nan", "Attels"] = ""
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
+    df["Image"] = df["Image"].astype(str).fillna("").str.strip()
 
     df = df[df["Materials"] != ""].drop_duplicates(subset=["Materials"], keep="last")
+
     return df
-
-
-def catalog_to_dict(df: pd.DataFrame) -> dict:
-    return dict(zip(df["Materials"], df["Cena"]))
-
-
-def catalog_image_map(df: pd.DataFrame) -> dict:
-    if "Attels" not in df.columns:
-        return {}
-    return dict(zip(df["Materials"], df["Attels"]))
 
 
 # -------------------------
