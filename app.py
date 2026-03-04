@@ -115,11 +115,9 @@ def show_material_image(path_or_url: str):
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
         content, info = fetch_image_bytes(path_or_url)
 
-        # DEBUG (ja negribi, izdzēs šo rindu)
-        st.caption(f"Image debug: {info}")
 
         if content:
-            st.image(content, caption="Materiāla attēls", use_container_width=True)
+            st.image(content, caption="Materiāla attēls", width=400)
         else:
             st.warning("Neizdevās ielādēt attēlu no URL.")
         return
