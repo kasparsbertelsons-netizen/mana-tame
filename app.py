@@ -1,23 +1,18 @@
 import os
 import json
 from datetime import date
-from io import BytesIO
+from urllib.parse import quote
 
 import streamlit as st
 import pandas as pd
 import requests
-
 from fpdf import FPDF
 
-
-# -------------------------
-# Lapas uzstādījumi
-# -------------------------
 st.set_page_config(page_title="MLK House Tāmētājs", layout="wide")
 
 
 # -------------------------
-# 1) PAROLES PĀRBAUDE
+# 1) PAROLE
 # -------------------------
 def check_password() -> bool:
     if "password_correct" not in st.session_state:
@@ -41,30 +36,23 @@ def check_password() -> bool:
 
 
 # -------------------------
-# 2) Logo (auto-atrod failu)
+# 2) LOGO
 # -------------------------
 def show_logo():
-    # rāda pirmo atrasto failu
     candidates = [
-        "mlkhouse.jpg",
-        "mlkhouse.png",
-        "logo.png",
-        "logo.jpg",
-        "logo.jpeg",
-        "logo.webp",
-        "images/logo.png",
-        "images/mlkhouse.jpg",
+        "mlkhouse.jpg", "mlkhouse.png",
+        "logo.png", "logo.jpg", "logo.jpeg", "logo.webp",
+        "logo.png.png",
+        "images/logo.png", "images/mlkhouse.jpg",
     ]
     for p in candidates:
         if os.path.exists(p):
             st.image(p, use_container_width=True)
             return
-    # Ja nav logo, nerādām kļūdu (lai netraucē)
-    st.caption("Logo fails nav atrasts (mlkhouse.jpg / logo.png / ...).")
 
 
 # -------------------------
-# 3) KATALOGA IELĀDE (cache)
+# 3) KATALOGS: Materials / Price / Image
 # -------------------------
 @st.cache_data(show_spinner=False)
 def load_catalog(path: str) -> pd.DataFrame:
@@ -73,32 +61,36 @@ def load_catalog(path: str) -> pd.DataFrame:
 
     df = pd.read_excel(path)
 
-    # pārliecināmies ka kolonnas eksistē
-    required = ["Materials", "Price"]
-    for col in required:
+    # obligātās kolonnas
+    for col in ["Materials", "Price"]:
         if col not in df.columns:
             raise ValueError(f"Excel failā trūkst kolonna: {col}")
 
-    # Image kolonna nav obligāta
+    # Image nav obligāta
     if "Image" not in df.columns:
         df["Image"] = ""
 
     df = df[["Materials", "Price", "Image"]].copy()
-
     df["Materials"] = df["Materials"].astype(str).str.strip()
-    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
+    df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0.0)
     df["Image"] = df["Image"].astype(str).fillna("").str.strip()
+    df.loc[df["Image"].str.lower() == "nan", "Image"] = ""
 
     df = df[df["Materials"] != ""].drop_duplicates(subset=["Materials"], keep="last")
-
     return df
 
 
-# -------------------------
-# 4) Attēlu ielāde (URL / lokāls fails)
-# -------------------------
-from urllib.parse import quote
+def catalog_price_dict(df: pd.DataFrame) -> dict:
+    return dict(zip(df["Materials"], df["Price"]))
 
+
+def catalog_image_dict(df: pd.DataFrame) -> dict:
+    return dict(zip(df["Materials"], df["Image"])) if "Image" in df.columns else {}
+
+
+# -------------------------
+# 4) ATTĒLU IELĀDE
+# -------------------------
 @st.cache_data(show_spinner=False)
 def fetch_image_bytes(url: str) -> tuple[bytes | None, str]:
     try:
@@ -109,7 +101,6 @@ def fetch_image_bytes(url: str) -> tuple[bytes | None, str]:
             "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         }
         r = requests.get(safe_url, timeout=12, headers=headers, allow_redirects=True)
-        # atgriežam arī info debugam
         info = f"HTTP {r.status_code}, content-type={r.headers.get('content-type')}, len={len(r.content)}"
         r.raise_for_status()
         return r.content, info
@@ -124,7 +115,7 @@ def show_material_image(path_or_url: str):
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
         content, info = fetch_image_bytes(path_or_url)
 
-        # DEBUG (vari pēc tam izņemt)
+        # DEBUG (ja negribi, izdzēs šo rindu)
         st.caption(f"Image debug: {info}")
 
         if content:
@@ -140,7 +131,7 @@ def show_material_image(path_or_url: str):
 
 
 # -------------------------
-# 5) PDF helpers
+# 5) PDF
 # -------------------------
 def safe_text_latin1(text: str) -> str:
     return (
@@ -157,13 +148,7 @@ def safe_text_latin1(text: str) -> str:
     )
 
 
-def create_pdf(
-    df: pd.DataFrame,
-    pamatsumma: float,
-    uzcenojums_pct: float,
-    pvn_pct: float,
-    kopa_ar_pvn: float,
-) -> bytes:
+def create_pdf(df: pd.DataFrame, pamatsumma: float, uzcenojums_pct: float, pvn_pct: float, kopa_ar_pvn: float) -> bytes:
     pdf = FPDF()
     pdf.add_page()
 
@@ -184,24 +169,18 @@ def create_pdf(
 
     if use_unicode:
         pdf.set_font("DejaVu", "B", 11)
-        h_materials, h_qty, h_price, h_sum = "Materials", "Daudz.", "Cena", "Summa"
+        h = ["Materials", "Daudz.", "Cena", "Summa"]
     else:
         pdf.set_font("Arial", "B", 11)
-        h_materials = safe_text_latin1("Materials")
-        h_qty = safe_text_latin1("Daudz.")
-        h_price = safe_text_latin1("Cena")
-        h_sum = safe_text_latin1("Summa")
+        h = list(map(safe_text_latin1, ["Materials", "Daudz.", "Cena", "Summa"]))
 
-    pdf.cell(90, 8, h_materials, 1)
-    pdf.cell(25, 8, h_qty, 1, align="R")
-    pdf.cell(35, 8, h_price, 1, align="R")
-    pdf.cell(40, 8, h_sum, 1, align="R")
+    pdf.cell(90, 8, h[0], 1)
+    pdf.cell(25, 8, h[1], 1, align="R")
+    pdf.cell(35, 8, h[2], 1, align="R")
+    pdf.cell(40, 8, h[3], 1, align="R")
     pdf.ln()
 
-    if use_unicode:
-        pdf.set_font("DejaVu", "", 11)
-    else:
-        pdf.set_font("Arial", "", 11)
+    pdf.set_font("DejaVu" if use_unicode else "Arial", "", 11)
 
     for _, row in df.iterrows():
         mat = str(row["Materials"])
@@ -220,76 +199,62 @@ def create_pdf(
 
     pdf.ln(4)
 
-    if use_unicode:
-        pdf.set_font("DejaVu", "B", 12)
-        l1 = "Pamatsumma:"
-        l2 = f"Uzcenojums ({uzcenojums_pct:.2f}%):"
-        l3 = f"PVN ({pvn_pct:.2f}%):"
-        l4 = "KOPĀ ar PVN:"
-    else:
-        pdf.set_font("Arial", "B", 12)
-        l1 = safe_text_latin1("Pamatsumma:")
-        l2 = safe_text_latin1(f"Uzcenojums ({uzcenojums_pct:.2f}%):")
-        l3 = safe_text_latin1(f"PVN ({pvn_pct:.2f}%):")
-        l4 = safe_text_latin1("KOPĀ ar PVN:")
-
     ar_uzcen = pamatsumma * (1 + uzcenojums_pct / 100)
     pvn_sum = ar_uzcen * (pvn_pct / 100)
 
-    pdf.cell(150, 8, l1, 0, align="R")
-    pdf.cell(40, 8, f"{pamatsumma:.2f} EUR", 0, align="R")
-    pdf.ln()
+    if use_unicode:
+        pdf.set_font("DejaVu", "B", 12)
+        labels = [
+            ("Pamatsumma:", pamatsumma),
+            (f"Uzcenojums ({uzcenojums_pct:.2f}%):", ar_uzcen - pamatsumma),
+            (f"PVN ({pvn_pct:.2f}%):", pvn_sum),
+            ("KOPĀ ar PVN:", kopa_ar_pvn),
+        ]
+    else:
+        pdf.set_font("Arial", "B", 12)
+        labels = [
+            (safe_text_latin1("Pamatsumma:"), pamatsumma),
+            (safe_text_latin1(f"Uzcenojums ({uzcenojums_pct:.2f}%):"), ar_uzcen - pamatsumma),
+            (safe_text_latin1(f"PVN ({pvn_pct:.2f}%):"), pvn_sum),
+            (safe_text_latin1("KOPĀ ar PVN:"), kopa_ar_pvn),
+        ]
 
-    pdf.cell(150, 8, l2, 0, align="R")
-    pdf.cell(40, 8, f"{(ar_uzcen - pamatsumma):.2f} EUR", 0, align="R")
-    pdf.ln()
-
-    pdf.cell(150, 8, l3, 0, align="R")
-    pdf.cell(40, 8, f"{pvn_sum:.2f} EUR", 0, align="R")
-    pdf.ln()
-
-    pdf.cell(150, 10, l4, 0, align="R")
-    pdf.cell(40, 10, f"{kopa_ar_pvn:.2f} EUR", 0, align="R")
+    for i, (lab, val) in enumerate(labels):
+        pdf.cell(150, 8 if i < 3 else 10, lab, 0, align="R")
+        pdf.cell(40, 8 if i < 3 else 10, f"{val:.2f} EUR", 0, align="R")
+        pdf.ln()
 
     return bytes(pdf.output(dest="S"))
 
 
 # -------------------------
-# 6) App
+# 6) APP
 # -------------------------
 if not check_password():
     st.stop()
 
 show_logo()
-
 st.title("🏠 MLK House Tāmētājs")
 
-# Sidebar aprēķini
 st.sidebar.header("Aprēķini")
 uzcenojums_pct = st.sidebar.number_input("Uzcenojums %", 0.0, 200.0, 10.0, 1.0)
 pvn_pct = st.sidebar.number_input("PVN %", 0.0, 25.0, 21.0, 0.5)
-
 st.sidebar.divider()
 
-# Katalogs
 catalog_path = "katalogs.xlsx"
-try:
-    df_kat = load_catalog(catalog_path)
-except Exception as e:
-    st.error(f"Kļūda katalogā: {e}")
-    st.stop()
+df_kat = load_catalog(catalog_path)
 
 if st.sidebar.button("🔄 Pārlasīt katalogu", use_container_width=True):
     load_catalog.clear()
     st.rerun()
 
-KATALOGS = catalog_to_dict(df_kat)
-IMG_MAP = catalog_image_map(df_kat)
+CAT_PRICE = catalog_price_dict(df_kat)
+CAT_IMG = catalog_image_dict(df_kat)
 
 if "tame" not in st.session_state:
     st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
 
-# Projekta ielāde/saglabāšana
+# Projekts: save/load
 st.sidebar.subheader("Projekts")
 up = st.sidebar.file_uploader("Ielādēt tāmi (JSON)", type=["json"])
 if up:
@@ -314,26 +279,26 @@ if st.sidebar.button("🗑️ Notīrīt visu", use_container_width=True):
     st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
     st.rerun()
 
-# Pievienot materiālu + attēls
+# Pievienot materiālu
 with st.expander("Pievienot materiālu", expanded=True):
-    if len(KATALOGS) == 0:
+    if len(CAT_PRICE) == 0:
         st.warning("Katalogs ir tukšs vai nav atrasts.")
         st.stop()
 
     q = st.text_input("Meklēt materiālu (daļa no nosaukuma)")
-    keys = list(KATALOGS.keys())
+    keys = list(CAT_PRICE.keys())
     if q:
         keys = [k for k in keys if q.lower() in k.lower()]
         if not keys:
             st.info("Nekas nav atrasts pēc meklēšanas.")
-            keys = list(KATALOGS.keys())
+            keys = list(CAT_PRICE.keys())
 
     izvele = st.selectbox("Izvēlies materiālu:", keys)
-    cena = float(KATALOGS[izvele])
+
+    cena = float(CAT_PRICE[izvele])
     st.write(f"Cena: **{cena:.2f} EUR**")
 
-    # Rādām attēlu no Excel kolonnas Attels (ja ir)
-    img = IMG_MAP.get(izvele, "")
+    img = str(CAT_IMG.get(izvele, "")).strip()
     if img:
         show_material_image(img)
 
@@ -361,7 +326,6 @@ with st.expander("Pievienot materiālu", expanded=True):
             df["Daudzums"] = pd.to_numeric(df["Daudzums"], errors="coerce").fillna(0.0)
             df["Cena"] = pd.to_numeric(df["Cena"], errors="coerce").fillna(0.0)
             df = df.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last"})
-
             st.session_state.tame = df
             st.rerun()
 
@@ -418,23 +382,14 @@ m2.metric("Ar uzcenojumu", f"{ar_uzcen:.2f} EUR")
 m3.metric("Kopā ar PVN", f"{kopa_ar_pvn:.2f} EUR")
 
 st.divider()
-c1, c2 = st.columns([1, 1])
-with c1:
-    try:
-        pdf_data = create_pdf(df2, pamatsumma, uzcenojums_pct, pvn_pct, kopa_ar_pvn)
-        st.download_button(
-            "📥 Lejupielādēt PDF",
-            data=pdf_data,
-            file_name=f"tame_{date.today().isoformat()}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
-    except Exception as e:
-        st.error(f"PDF kļūda: {e}")
-
-with c2:
-    st.caption("Attēls pie materiāla tiek ņemts no Excel kolonnas 'Attels' (URL vai lokāls ceļš repo).")
-    if os.path.exists(os.path.join(os.path.dirname(__file__), "DejaVuSans.ttf")):
-        st.caption("PDF: Unicode režīms (DejaVuSans.ttf atrasts).")
-    else:
-        st.caption("PDF: parastie fonti (daži simboli tiks aizvietoti: €→EUR, –→-).")
+try:
+    pdf_data = create_pdf(df2, pamatsumma, uzcenojums_pct, pvn_pct, kopa_ar_pvn)
+    st.download_button(
+        "📥 Lejupielādēt PDF",
+        data=pdf_data,
+        file_name=f"tame_{date.today().isoformat()}.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
+except Exception as e:
+    st.error(f"PDF kļūda: {e}")
