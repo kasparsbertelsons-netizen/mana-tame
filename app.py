@@ -1,14 +1,16 @@
 import os
 import json
+import re
 from datetime import date
 from urllib.parse import quote
 
 import streamlit as st
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 from fpdf import FPDF
 
-st.set_page_config(page_title="MLK House Tāmētājs", layout="wide")
+st.set_page_config(page_title="MLK Houses Tāmētājs", layout="wide")
 
 
 # -------------------------
@@ -26,7 +28,7 @@ def check_password() -> bool:
         st.write("### MLK House Sistēma")
         pwd = st.text_input("Ievadiet paroli", type="password")
         if st.button("Ieiet", use_container_width=True):
-            real_pwd = st.secrets.get("APP_PASSWORD", "buve2024")
+            real_pwd = st.secrets.get("APP_PASSWORD", "mlk")
             if pwd == real_pwd:
                 st.session_state["password_correct"] = True
                 st.rerun()
@@ -52,29 +54,35 @@ def show_logo():
 
 
 # -------------------------
-# 3) KATALOGS: Materials / Price / Image
+# 3) KATALOGS: Materials / Price / Image / Description / URL
 # -------------------------
 @st.cache_data(show_spinner=False)
 def load_catalog(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
-        return pd.DataFrame(columns=["Materials", "Price", "Image"])
+        return pd.DataFrame(columns=["Materials", "Price", "Image", "Description", "URL"])
 
     df = pd.read_excel(path)
 
-    # obligātās kolonnas
     for col in ["Materials", "Price"]:
         if col not in df.columns:
             raise ValueError(f"Excel failā trūkst kolonna: {col}")
 
-    # Image nav obligāta
+    # optional kolonnas
     if "Image" not in df.columns:
         df["Image"] = ""
+    if "Description" not in df.columns:
+        df["Description"] = ""
+    if "URL" not in df.columns:
+        df["URL"] = ""
 
-    df = df[["Materials", "Price", "Image"]].copy()
+    df = df[["Materials", "Price", "Image", "Description", "URL"]].copy()
+
     df["Materials"] = df["Materials"].astype(str).str.strip()
     df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0.0)
-    df["Image"] = df["Image"].astype(str).fillna("").str.strip()
-    df.loc[df["Image"].str.lower() == "nan", "Image"] = ""
+
+    for c in ["Image", "Description", "URL"]:
+        df[c] = df[c].astype(str).fillna("").str.strip()
+        df.loc[df[c].str.lower() == "nan", c] = ""
 
     df = df[df["Materials"] != ""].drop_duplicates(subset=["Materials"], keep="last")
     return df
@@ -88,16 +96,31 @@ def catalog_image_dict(df: pd.DataFrame) -> dict:
     return dict(zip(df["Materials"], df["Image"])) if "Image" in df.columns else {}
 
 
+def catalog_desc_dict(df: pd.DataFrame) -> dict:
+    return dict(zip(df["Materials"], df["Description"])) if "Description" in df.columns else {}
+
+
+def catalog_url_dict(df: pd.DataFrame) -> dict:
+    return dict(zip(df["Materials"], df["URL"])) if "URL" in df.columns else {}
+
+
 # -------------------------
-# 4) ATTĒLU IELĀDE
+# 4) ATTĒLI
 # -------------------------
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+
+
+def is_direct_image_url(u: str) -> bool:
+    u = (u or "").strip().lower()
+    return u.startswith("http") and any(u.split("?")[0].endswith(ext) for ext in IMAGE_EXTS)
+
+
 @st.cache_data(show_spinner=False)
 def fetch_image_bytes(url: str) -> tuple[bytes | None, str]:
     try:
         safe_url = quote(url.strip(), safe=":/?&=%#.+-@~")
         headers = {
             "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.mm-holz.com/",
             "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         }
         r = requests.get(safe_url, timeout=12, headers=headers, allow_redirects=True)
@@ -108,28 +131,93 @@ def fetch_image_bytes(url: str) -> tuple[bytes | None, str]:
         return None, f"ERROR: {e}"
 
 
-def show_material_image(path_or_url: str):
+def show_material_image(path_or_url: str, width: int = 520):
     if not path_or_url:
         return
 
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
         content, info = fetch_image_bytes(path_or_url)
-
-
         if content:
-            st.image(content, caption="Material image", width=400)
+            st.image(content, caption="Materiāla attēls", width=width)
         else:
-            st.warning("Neizdevās ielādēt attēlu no URL.")
+            st.warning(f"Neizdevās ielādēt attēlu. {info}")
         return
 
     if os.path.exists(path_or_url):
-        st.image(path_or_url, caption="Materiāla attēls", use_container_width=True)
+        st.image(path_or_url, caption="Materiāla attēls", width=width)
     else:
         st.warning(f"Attēla fails nav atrasts: {path_or_url}")
 
 
 # -------------------------
-# 5) PDF
+# 5) AUTO APRAKSTS NO URL
+# -------------------------
+def _clean_text(s: str) -> str:
+    s = re.sub(r"\s+", " ", (s or "").strip())
+    return s
+
+
+@st.cache_data(show_spinner=False)
+def generate_description_from_url(url: str) -> tuple[str, str]:
+    """
+    Atgriež (apraksts, debug)
+    Paņem: og:description, meta description, h1, title, pirmais <p>.
+    """
+    if not url:
+        return "", "No URL"
+
+    try:
+        safe_url = quote(url.strip(), safe=":/?&=%#.+-@~")
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        r = requests.get(safe_url, timeout=12, headers=headers, allow_redirects=True)
+        ct = (r.headers.get("content-type") or "").lower()
+        debug = f"HTTP {r.status_code}, content-type={ct}"
+        r.raise_for_status()
+
+        if "text/html" not in ct and "application/xhtml" not in ct:
+            return "", f"{debug} (not html)"
+
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # meta og/description
+        og_desc = soup.find("meta", property="og:description")
+        meta_desc = soup.find("meta", attrs={"name": "description"})
+        title_tag = soup.find("title")
+        h1 = soup.find("h1")
+        p = soup.find("p")
+
+        parts = []
+
+        # Pirmā rinda: H1 vai title
+        headline = _clean_text(h1.get_text(" ", strip=True) if h1 else "")
+        if not headline:
+            headline = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else "")
+        headline = headline[:120]
+        if headline:
+            parts.append(headline)
+
+        # Apraksts: og/meta/pirmais p
+        desc = _clean_text(og_desc.get("content", "") if og_desc else "")
+        if not desc:
+            desc = _clean_text(meta_desc.get("content", "") if meta_desc else "")
+        if not desc and p:
+            desc = _clean_text(p.get_text(" ", strip=True))
+
+        desc = desc[:350]
+        if desc:
+            parts.append(desc)
+
+        out = "\n\n".join(parts).strip()
+        return out, debug
+    except Exception as e:
+        return "", f"ERROR: {e}"
+
+
+# -------------------------
+# 6) PDF
 # -------------------------
 def safe_text_latin1(text: str) -> str:
     return (
@@ -226,7 +314,7 @@ def create_pdf(df: pd.DataFrame, pamatsumma: float, uzcenojums_pct: float, pvn_p
 
 
 # -------------------------
-# 6) APP
+# 7) APP
 # -------------------------
 if not check_password():
     st.stop()
@@ -244,13 +332,18 @@ df_kat = load_catalog(catalog_path)
 
 if st.sidebar.button("🔄 Pārlasīt katalogu", use_container_width=True):
     load_catalog.clear()
+    generate_description_from_url.clear()
+    fetch_image_bytes.clear()
     st.rerun()
 
 CAT_PRICE = catalog_price_dict(df_kat)
-CAT_IMG = catalog_image_dict(df_kat)
+CAT_IMG = dict(zip(df_kat["Materials"], df_kat["Image"]))
+CAT_DESC = dict(zip(df_kat["Materials"], df_kat["Description"]))
+CAT_URL = dict(zip(df_kat["Materials"], df_kat["URL"]))
 
 if "tame" not in st.session_state:
     st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
+
 
 # Projekts: save/load
 st.sidebar.subheader("Projekts")
@@ -277,6 +370,7 @@ if st.sidebar.button("🗑️ Notīrīt visu", use_container_width=True):
     st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
     st.rerun()
 
+
 # Pievienot materiālu
 with st.expander("Pievienot materiālu", expanded=True):
     if len(CAT_PRICE) == 0:
@@ -292,13 +386,44 @@ with st.expander("Pievienot materiālu", expanded=True):
             keys = list(CAT_PRICE.keys())
 
     izvele = st.selectbox("Izvēlies materiālu:", keys)
-
     cena = float(CAT_PRICE[izvele])
     st.write(f"Cena: **{cena:.2f} EUR**")
 
     img = str(CAT_IMG.get(izvele, "")).strip()
-    if img:
-        show_material_image(img)
+    desc = str(CAT_DESC.get(izvele, "")).strip()
+    url = str(CAT_URL.get(izvele, "")).strip()
+
+    # Ja nav URL, bet Image izskatās pēc lapas (nevis .jpg), izmanto Image kā URL
+    if not url and img and img.startswith("http") and not is_direct_image_url(img):
+        url = img
+
+    # Auto apraksts: ja Excel apraksts tukšs un ir URL
+    auto_desc = ""
+    auto_debug = ""
+    if (not desc) and url:
+        auto_desc, auto_debug = generate_description_from_url(url)
+
+    # UI: bilde + apraksts blakus
+    if img or desc or auto_desc:
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if img and is_direct_image_url(img):
+                show_material_image(img, width=520)
+            elif img and img.startswith("http"):
+                st.info("Šeit 'Image' ir lapa, nevis bilde. Ieliec tiešo .jpg/.png vai ieliec URL kolonnā.")
+        with c2:
+            st.markdown("### Apraksts")
+            if desc:
+                st.write(desc)
+            elif auto_desc:
+                st.write(auto_desc)
+                st.caption(f"Auto no URL: {auto_debug}")
+            else:
+                st.caption("Nav apraksta.")
+
+            if url:
+                st.markdown("**URL:**")
+                st.write(url)
 
     daudz = st.number_input("Daudzums:", min_value=0.0, step=1.0, value=1.0)
 
@@ -334,6 +459,7 @@ with st.expander("Pievienot materiālu", expanded=True):
         df = df.groupby("Materials", as_index=False).agg({"Daudzums": "sum", "Cena": "last"})
         st.session_state.tame = df
         st.rerun()
+
 
 # Kopsavilkums
 df = st.session_state.tame.copy()
