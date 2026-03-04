@@ -99,9 +99,10 @@ def create_pdf(df: pd.DataFrame, kopa: float):
     pdf.ln(4)
     pdf.set_font("DejaVu", "B", 12)
     pdf.cell(150, 10, "KOPĀ:", 0, align="R")
+    # ...
     pdf.cell(40, 10, f"{kopa:.2f} EUR", 0, align="R")
 
-    return pdf.output(dest="S")  # bytes (fpdf2)
+    return bytes(pdf.output(dest="S"))
 
 
 # -------------------------
