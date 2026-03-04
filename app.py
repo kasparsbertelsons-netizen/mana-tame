@@ -60,17 +60,22 @@ def katalogs_dict(df_kat: pd.DataFrame) -> dict:
 # -------------------------
 # 3) PDF (Unicode + latviešu burti)
 # -------------------------
+import os
+from fpdf import FPDF
+import pandas as pd
+
 def create_pdf(df: pd.DataFrame, kopa: float):
     pdf = FPDF()
     pdf.add_page()
 
-    # Unicode fonts (pārliecinies, ka fails eksistē)
-    font_path = "DejaVuSans.ttf"
+    # Drošs ceļš uz fontu (strādā gan lokāli, gan Streamlit Cloud)
+    font_path = os.path.join(os.path.dirname(__file__), "DejaVuSans.ttf")
     if not os.path.exists(font_path):
-        raise FileNotFoundError("Nav atrasts fonts 'DejaVuSans.ttf'. Ieliec to blakus app.py.")
+        raise FileNotFoundError(f"Nav atrasts fonts: {font_path}")
 
     pdf.add_font("DejaVu", "", font_path, uni=True)
     pdf.add_font("DejaVu", "B", font_path, uni=True)
+
     pdf.set_font("DejaVu", "B", 16)
     pdf.cell(0, 10, txt="BUVNIECĪBAS TĀME", ln=True, align="C")
     pdf.ln(6)
@@ -85,9 +90,9 @@ def create_pdf(df: pd.DataFrame, kopa: float):
     pdf.set_font("DejaVu", "", 11)
     for _, row in df.iterrows():
         s = float(row["Daudzums"]) * float(row["Cena"])
-        pdf.cell(90, 8, str(row["Materials"])[:40], 1)   # apgriež garus nosaukumus
-        pdf.cell(25, 8, f"{row['Daudzums']:.2f}", 1, align="R")
-        pdf.cell(35, 8, f"{row['Cena']:.2f}", 1, align="R")
+        pdf.cell(90, 8, str(row["Materials"])[:40], 1)
+        pdf.cell(25, 8, f"{float(row['Daudzums']):.2f}", 1, align="R")
+        pdf.cell(35, 8, f"{float(row['Cena']):.2f}", 1, align="R")
         pdf.cell(40, 8, f"{s:.2f}", 1, align="R")
         pdf.ln()
 
@@ -96,8 +101,7 @@ def create_pdf(df: pd.DataFrame, kopa: float):
     pdf.cell(150, 10, "KOPĀ:", 0, align="R")
     pdf.cell(40, 10, f"{kopa:.2f} EUR", 0, align="R")
 
-    # fpdf2 atgriež bytes ar dest="S"
-    return pdf.output(dest="S")
+    return pdf.output(dest="S")  # bytes (fpdf2)
 
 
 # -------------------------
