@@ -112,37 +112,46 @@ def catalog_image_map(df: pd.DataFrame) -> dict:
 # -------------------------
 # 4) Attēlu ielāde (URL / lokāls fails)
 # -------------------------
+from urllib.parse import quote
+
 @st.cache_data(show_spinner=False)
-def fetch_image_bytes(url: str) -> bytes | None:
-    """Lejupielādē attēlu no URL. Cache, lai nav jāvelk katru reizi."""
+def fetch_image_bytes(url: str) -> tuple[bytes | None, str]:
     try:
-        r = requests.get(url, timeout=8)
+        safe_url = quote(url.strip(), safe=":/?&=%#.+-@~")
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.mm-holz.com/",
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        }
+        r = requests.get(safe_url, timeout=12, headers=headers, allow_redirects=True)
+        # atgriežam arī info debugam
+        info = f"HTTP {r.status_code}, content-type={r.headers.get('content-type')}, len={len(r.content)}"
         r.raise_for_status()
-        return r.content
-    except Exception:
-        return None
+        return r.content, info
+    except Exception as e:
+        return None, f"ERROR: {e}"
 
 
 def show_material_image(path_or_url: str):
     if not path_or_url:
         return
 
-    # URL
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        content = fetch_image_bytes(path_or_url)
+        content, info = fetch_image_bytes(path_or_url)
+
+        # DEBUG (vari pēc tam izņemt)
+        st.caption(f"Image debug: {info}")
+
         if content:
             st.image(content, caption="Materiāla attēls", use_container_width=True)
         else:
             st.warning("Neizdevās ielādēt attēlu no URL.")
         return
 
-    # Lokāls ceļš (repo)
-    p = path_or_url
-    # ļaujam rakstīt arī relative ceļu no repo saknes
-    if os.path.exists(p):
-        st.image(p, caption="Materiāla attēls", use_container_width=True)
+    if os.path.exists(path_or_url):
+        st.image(path_or_url, caption="Materiāla attēls", use_container_width=True)
     else:
-        st.warning(f"Attēla fails nav atrasts: {p}")
+        st.warning(f"Attēla fails nav atrasts: {path_or_url}")
 
 
 # -------------------------
