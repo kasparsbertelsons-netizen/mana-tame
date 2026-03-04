@@ -355,7 +355,7 @@ with st.expander("Pievienot materiālu", expanded=True):
 
     # Produkta kartīte: attēls + teksts blakus
     if img or desc or auto_desc:
-        c1, c2 = st.columns([1, 2])
+        c1, c2 = st.columns([1, 3])
 
         with c1:
             if img and is_direct_image_url(img):
