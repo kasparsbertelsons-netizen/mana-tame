@@ -353,7 +353,7 @@ with st.expander("Pievienot materiālu", expanded=True):
 
     # Produkta kartīte
     if img or desc or auto_desc:
-        c1, c2 = st.columns([1, 3])  # platāks tekstam
+        c1, c2 = st.columns([1, 1])  # platāks tekstam
         with c1:
             if img and is_direct_image_url(img):
                 show_material_image(img, width=350)
