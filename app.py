@@ -41,7 +41,7 @@ def check_password() -> bool:
 # -------------------------
 def show_logo():
     candidates = [
-        "mlkhouse.jpg",
+        "mlkhouse.JPG",
         "mlkhouse.png",
         "logo.png",
         "logo.jpg",
