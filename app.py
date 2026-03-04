@@ -10,7 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 from fpdf import FPDF
 
-st.set_page_config(page_title="MLK Houses Tāmētājs", layout="wide")
+st.set_page_config(page_title="MLK House Tāmētājs", layout="wide")
 
 
 # -------------------------
@@ -28,7 +28,7 @@ def check_password() -> bool:
         st.write("### MLK House Sistēma")
         pwd = st.text_input("Ievadiet paroli", type="password")
         if st.button("Ieiet", use_container_width=True):
-            real_pwd = st.secrets.get("APP_PASSWORD", "mlk")
+            real_pwd = st.secrets.get("APP_PASSWORD", "buve2024")
             if pwd == real_pwd:
                 st.session_state["password_correct"] = True
                 st.rerun()
@@ -42,10 +42,15 @@ def check_password() -> bool:
 # -------------------------
 def show_logo():
     candidates = [
-        "mlkhouse.jpg", "mlkhouse.png",
-        "logo.png", "logo.jpg", "logo.jpeg", "logo.webp",
+        "mlkhouse.jpg",
+        "mlkhouse.png",
+        "logo.png",
+        "logo.jpg",
+        "logo.jpeg",
+        "logo.webp",
         "logo.png.png",
-        "images/logo.png", "images/mlkhouse.jpg",
+        "images/logo.png",
+        "images/mlkhouse.jpg",
     ]
     for p in candidates:
         if os.path.exists(p):
@@ -92,18 +97,6 @@ def catalog_price_dict(df: pd.DataFrame) -> dict:
     return dict(zip(df["Materials"], df["Price"]))
 
 
-def catalog_image_dict(df: pd.DataFrame) -> dict:
-    return dict(zip(df["Materials"], df["Image"])) if "Image" in df.columns else {}
-
-
-def catalog_desc_dict(df: pd.DataFrame) -> dict:
-    return dict(zip(df["Materials"], df["Description"])) if "Description" in df.columns else {}
-
-
-def catalog_url_dict(df: pd.DataFrame) -> dict:
-    return dict(zip(df["Materials"], df["URL"])) if "URL" in df.columns else {}
-
-
 # -------------------------
 # 4) ATTĒLI
 # -------------------------
@@ -131,7 +124,7 @@ def fetch_image_bytes(url: str) -> tuple[bytes | None, str]:
         return None, f"ERROR: {e}"
 
 
-def show_material_image(path_or_url: str, width: int = 520):
+def show_material_image(path_or_url: str, width: int = 420):
     if not path_or_url:
         return
 
@@ -150,21 +143,16 @@ def show_material_image(path_or_url: str, width: int = 520):
 
 
 # -------------------------
-# 5) AUTO APRAKSTS NO URL
+# 5) AUTO APRAKSTS NO URL (bez debug teksta UI)
 # -------------------------
 def _clean_text(s: str) -> str:
-    s = re.sub(r"\s+", " ", (s or "").strip())
-    return s
+    return re.sub(r"\s+", " ", (s or "").strip())
 
 
 @st.cache_data(show_spinner=False)
-def generate_description_from_url(url: str) -> tuple[str, str]:
-    """
-    Atgriež (apraksts, debug)
-    Paņem: og:description, meta description, h1, title, pirmais <p>.
-    """
+def generate_description_from_url(url: str) -> str:
     if not url:
-        return "", "No URL"
+        return ""
 
     try:
         safe_url = quote(url.strip(), safe=":/?&=%#.+-@~")
@@ -173,47 +161,36 @@ def generate_description_from_url(url: str) -> tuple[str, str]:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         r = requests.get(safe_url, timeout=12, headers=headers, allow_redirects=True)
-        ct = (r.headers.get("content-type") or "").lower()
-        debug = f"HTTP {r.status_code}, content-type={ct}"
         r.raise_for_status()
 
+        ct = (r.headers.get("content-type") or "").lower()
         if "text/html" not in ct and "application/xhtml" not in ct:
-            return "", f"{debug} (not html)"
+            return ""
 
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # meta og/description
         og_desc = soup.find("meta", property="og:description")
         meta_desc = soup.find("meta", attrs={"name": "description"})
         title_tag = soup.find("title")
         h1 = soup.find("h1")
         p = soup.find("p")
 
-        parts = []
-
-        # Pirmā rinda: H1 vai title
         headline = _clean_text(h1.get_text(" ", strip=True) if h1 else "")
         if not headline:
             headline = _clean_text(title_tag.get_text(" ", strip=True) if title_tag else "")
         headline = headline[:120]
-        if headline:
-            parts.append(headline)
 
-        # Apraksts: og/meta/pirmais p
         desc = _clean_text(og_desc.get("content", "") if og_desc else "")
         if not desc:
             desc = _clean_text(meta_desc.get("content", "") if meta_desc else "")
         if not desc and p:
             desc = _clean_text(p.get_text(" ", strip=True))
-
         desc = desc[:350]
-        if desc:
-            parts.append(desc)
 
-        out = "\n\n".join(parts).strip()
-        return out, debug
-    except Exception as e:
-        return "", f"ERROR: {e}"
+        parts = [x for x in [headline, desc] if x]
+        return "\n\n".join(parts).strip()
+    except Exception:
+        return ""
 
 
 # -------------------------
@@ -327,6 +304,11 @@ uzcenojums_pct = st.sidebar.number_input("Uzcenojums %", 0.0, 200.0, 10.0, 1.0)
 pvn_pct = st.sidebar.number_input("PVN %", 0.0, 25.0, 21.0, 0.5)
 st.sidebar.divider()
 
+# Pogas sidebar (tikai nepieciešamais)
+if st.sidebar.button("🗑️ Notīrīt visu", use_container_width=True):
+    st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
+    st.rerun()
+
 catalog_path = "katalogs.xlsx"
 df_kat = load_catalog(catalog_path)
 
@@ -344,9 +326,6 @@ CAT_URL = dict(zip(df_kat["Materials"], df_kat["URL"]))
 if "tame" not in st.session_state:
     st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
 
-if st.sidebar.button("🗑️ Notīrīt visu", use_container_width=True):
-    st.session_state.tame = pd.DataFrame(columns=["Materials", "Daudzums", "Cena"])
-    st.rerun()
 
 # Pievienot materiālu
 with st.expander("Pievienot materiālu", expanded=True):
@@ -364,49 +343,40 @@ with st.expander("Pievienot materiālu", expanded=True):
 
     izvele = st.selectbox("Izvēlies materiālu:", keys)
     cena = float(CAT_PRICE[izvele])
-    st.write(f"Cena: **{cena:.2f} EUR**")
 
     img = str(CAT_IMG.get(izvele, "")).strip()
     desc = str(CAT_DESC.get(izvele, "")).strip()
     url = str(CAT_URL.get(izvele, "")).strip()
 
-    # Ja nav URL, bet Image izskatās pēc lapas (nevis .jpg), izmanto Image kā URL
-    if not url and img and img.startswith("http") and not is_direct_image_url(img):
-        url = img
-
-    # Auto apraksts: ja Excel apraksts tukšs un ir URL
+    # Ja apraksts tukšs un ir URL -> ģenerē
     auto_desc = ""
-    auto_debug = ""
     if (not desc) and url:
-        auto_desc, auto_debug = generate_description_from_url(url)
+        auto_desc = generate_description_from_url(url)
 
-    # UI: bilde + apraksts blakus
+    # Produkta kartīte: attēls + teksts blakus
     if img or desc or auto_desc:
+        c1, c2 = st.columns([1, 2])
 
-    c1, c2 = st.columns([1,2])
+        with c1:
+            if img and is_direct_image_url(img):
+                show_material_image(img, width=420)
+            elif img and img.startswith("http") and not is_direct_image_url(img):
+                st.info("Kolonnā 'Image' vajag tiešo .jpg/.png linku.")
 
-    with c1:
-        if img and is_direct_image_url(img):
-            show_material_image(img, width=420)
+        with c2:
+            st.markdown(f"## {izvele}")
+            st.markdown(f"**Cena:** {cena:.2f} EUR")
+            st.markdown("### Apraksts")
 
-    with c2:
-        st.markdown(f"## {izvele}")
-        st.markdown(f"**Cena:** {cena:.2f} EUR")
-
-        st.markdown("### Apraksts")
-
-        if desc:
-            st.write(desc)
-
-        elif auto_desc:
-            st.write(auto_desc)
-
-        else:
-            st.caption("Nav apraksta.")
+            if desc:
+                st.write(desc)
+            elif auto_desc:
+                st.write(auto_desc)
+            else:
+                st.caption("Nav apraksta.")
 
             if url:
-                st.markdown("**URL:**")
-                st.write(url)
+                st.link_button("🔗 Atvērt produkta lapu", url)
 
     daudz = st.number_input("Daudzums:", min_value=0.0, step=1.0, value=1.0)
 
