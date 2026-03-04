@@ -46,7 +46,6 @@ def check_password() -> bool:
 def show_logo():
     # rāda pirmo atrasto failu
     candidates = [
-        "logo.png",
         "mlkhouse.jpg",
         "mlkhouse.png",
         "logo.png",
