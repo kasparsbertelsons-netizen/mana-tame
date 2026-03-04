@@ -117,7 +117,7 @@ def show_material_image(path_or_url: str):
 
 
         if content:
-            st.image(content, caption="Materiāla attēls", width=400)
+            st.image(content, caption="Material image", width=400)
         else:
             st.warning("Neizdevās ielādēt attēlu no URL.")
         return
