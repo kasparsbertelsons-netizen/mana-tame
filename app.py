@@ -388,17 +388,17 @@ with st.expander("Pievienot materiālu", expanded=True):
                 show_material_image(img, width=520)
             elif img and img.startswith("http"):
                 st.info("Šeit 'Image' ir lapa, nevis bilde. Ieliec tiešo .jpg/.png vai ieliec URL kolonnā.")
-        with c2:
-        st.markdown("### Apraksts")
+    with c2:
+            st.markdown("### Apraksts")
 
-    if desc:
-        st.write(desc)
+        if desc:
+            st.write(desc)
 
-    elif auto_desc:
-        st.write(auto_desc)
+        elif auto_desc:
+            st.write(auto_desc)
 
-    else:
-        st.caption("Nav apraksta.")
+        else:
+            st.caption("Nav apraksta.")
 
             if url:
                 st.markdown("**URL:**")
