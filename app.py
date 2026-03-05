@@ -9,7 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 from fpdf import FPDF
 
-st.set_page_config(page_title="MLK House Tāmētājs", layout="wide")
+st.set_page_config(page_title="MLK Houses Tāmētājs", layout="wide")
 
 
 # -------------------------
@@ -27,7 +27,7 @@ def check_password() -> bool:
         st.write("### MLK House Sistēma")
         pwd = st.text_input("Ievadiet paroli", type="password")
         if st.button("Ieiet", use_container_width=True):
-            real_pwd = st.secrets.get("APP_PASSWORD", "buve2024")
+            real_pwd = st.secrets.get("APP_PASSWORD", "mlk")
             if pwd == real_pwd:
                 st.session_state["password_correct"] = True
                 st.rerun()
